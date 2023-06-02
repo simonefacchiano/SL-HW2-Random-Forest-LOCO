@@ -79,3 +79,5 @@ train <- cbind(train_info, q1_roi, q2_roi, q3_roi)
 # Standardizzazione dei dati (per riga) ----------------------------------------------------------
 
 hist(rowMeans(train[, -c(1:4)])) # easy
+
+#PROVA CIAO SUSANNA
