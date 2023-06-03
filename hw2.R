@@ -46,8 +46,60 @@ q3_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(star
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.75)
 }))
 
+sd_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=sd)
+}))
+
+mean_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
+}))
+
+cor_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=cor)
+}))
+
+max_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=max)
+}))
+
+min_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=min)
+}))
+
+
+
+roi <- unique(
+  sub(".*_", "", colnames(train_roi))
+)
+
+# Ora posso inserirle nell'altra tabella:
+colnames(q1_roi) = paste0('q1_', roi) # molto meglio
+colnames(q2_roi) = paste0('q2_', roi)
+colnames(q3_roi) = paste0('q3_', roi)
+colnames(sd_roi) = paste0('sd_', roi)
+colnames(mean_roi) = paste0('mean_', roi)
+colnames(cor_roi) = paste0('cor_', roi)
+colnames(max_roi) = paste0('max_', roi)
+colnames(min_roi) = paste0('min_', roi)
 
 #train_medie <- as.data.frame(medie_roi)
+
+prova = cbind(train_info, q2_roi, max_roi, min_roi)
+prova = prova[, -1]
+rm(train)
+
+prop.table(table(prova$sex, prova$y))
+
+prova$sex = as.factor(ifelse(prova$sex == 'male', 1, 0))
+prova$y = as.factor(ifelse(prova$y == 'autism', 1, 0))
+
+
+# prop.table(table(prova$y))
 
 # Tutto bello, ma i nomi non sono indicativi. Dobbiamo trovare un modo per estrarre i nomi delle ROI, così possiamo rendere questa tabella più informativa.
 
@@ -59,7 +111,7 @@ q3_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(star
 # Uso unique per estrarre i valori univoci
 roi <- unique(
   sub(".*_", "", colnames(train_roi))
-  )
+)
 
 # Ora posso inserirle nell'altra tabella:
 colnames(q1_roi) = paste0('q1_', roi) # molto meglio
@@ -80,4 +132,59 @@ train <- cbind(train_info, q1_roi, q2_roi, q3_roi)
 
 hist(rowMeans(train[, -c(1:4)])) # easy
 
-#PROVA CIAO SUSANNA
+
+
+# Modello: Random Forest --------------------------------------------------
+
+library(caret)
+control <- trainControl(method='cv', 
+                        number = 5)
+
+metric <- "Accuracy"
+set.seed(123)
+mtry <- round(sqrt(ncol(prova) - 1)) # optimal number of columns
+tunegrid <- expand.grid(.mtry=mtry)
+rf_default <- train(y ~. , 
+                    data = prova, 
+                    method = 'rf', 
+                    metric = 'Accuracy', 
+                    tuneGrid = tunegrid, 
+                    trControl = control)
+print(rf_default)
+
+baseline_accuracy <- rf_default$results$Accuracy
+
+varImp(rf_default, scale = F)
+var_imp = data.frame(varImp(rf_default, scale = F)$importance)
+var_imp$variable = rownames(var_imp)
+var_imp <- data.frame(var_imp[order(var_imp$Overall, decreasing = TRUE), ])
+
+top_variables = var_imp[1:10, 2]
+
+
+
+# LOCO -------------------------------------------------------------------
+
+top_variables
+
+prova_10 <- prova[, c(top_variables, 'y')]
+
+variables = c()
+accuracies = c()
+for(j in 1:(ncol(prova_10) - 1)){
+  
+  variables <- c(variables, j)
+  
+  mtry <- round(sqrt(ncol(prova_10) - 1)) # optimal number of columns
+  tunegrid <- expand.grid(.mtry=mtry)
+  mdl <- train(y ~. , 
+               data = prova_10[, -j], 
+               method = 'rf', 
+               metric = 'Accuracy', 
+               tuneGrid = tunegrid, 
+               trControl = control)
+  
+  accuracies <- c(accuracies, baseline_accuracy - mdl$results$Accuracy)
+}
+
+data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = accuracies))
