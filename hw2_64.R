@@ -95,7 +95,7 @@ colnames(max_roi) = paste0('max_', roi)
 colnames(min_roi) = paste0('min_', roi)
 
 
-prova = cbind(train_info, q1_roi, q2_roi, q3_roi)
+prova = cbind(train_info, q1_roi, q2_roi, q3_roi, min_roi, max_roi)
 prova = prova[, -1]
 rm(train)
 
@@ -143,6 +143,29 @@ grid()
 abline(v = c(10, 50), col = 'red', lwd = 1.7, lty = 2)
 
 top_variables = var_imp[1:50, 2]
+
+
+
+# Nuovo modello con 50 variabili ------------------------------------------
+
+prova_10_corr <- prova[, c(top_variables)]
+prova_10_corr$y <- prova$y
+
+control <- trainControl(method='repeatedcv', 
+                        number=10, 
+                        repeats=3,
+                        search = 'random')
+
+#tunegrid <- expand.grid(.mtry=9)
+tunegrid <- expand.grid(.mtry=c(6, 7, 8, 9))
+rf_default10 <- train(y ~. , 
+                      data = prova_10_corr, 
+                      method = 'rf', 
+                      metric = 'Accuracy', 
+                      tuneGrid = tunegrid,
+                      #ntree = 1000,
+                      trControl = control)
+print(rf_default10)
 
 # LOCO -------------------------------------------------------------------
 
@@ -303,6 +326,136 @@ mdl_submission <- train(y ~. ,
 
 print(mdl_submission)
 
+
+
+
+# LOCO per davvero --------------------------------------------------------
+
+prova_10 <- prova[, c(top_variables[1:13], 'y')] # <-- OUR TOP VARIABLES + FLOP variables
+
+# STEP 0: check for highly correlated variables
+library(corrplot)
+corrplot(cor(prova_10[, -14]))
+
+
+high_cor_pairs <- which(abs(cor(prova_10[, -14])) > 0.6 & cor(prova_10[, -14]) < 0.99, arr.ind = TRUE)
+discard_variables <- c()
+for (i in 1:nrow(high_cor_pairs)) {
+  variable1 <- colnames(cor(prova_10[, -14]))[high_cor_pairs[i, 1]]
+  variable2 <- colnames(cor(prova_10[, -14]))[high_cor_pairs[i, 2]]
+  
+  ifelse(var_imp[variable1, 'Overall'] > var_imp[variable2, 'Overall'],
+         discard_variables <- c(discard_variables, variable2),
+         discard_variables <- c(discard_variables, variable1))
+}
+
+discard_variables <- unique(discard_variables)
+
+library(dplyr)
+LOCO_variables <- prova_10 %>%
+  select(-one_of(discard_variables))
+
+# STEP 1: partition in train e test
+idx <- createDataPartition(LOCO_variables$y, p = 0.8, list = FALSE)
+prova_10_train <- LOCO_variables[-idx,] # 80%
+prova_10_test <- LOCO_variables[idx,] # 20%
+
+# STEP 2: Run algorithm to compute estimate fˆ on first part D1
+mtry <- round(sqrt(ncol(prova_10_train) - 1)) # optimal number of columns
+tunegrid <- expand.grid(.mtry=mtry)
+control <- trainControl(method='cv', 
+                        number = 5)
+
+rf_default <- train(y ~. , 
+                    data = prova_10_train, 
+                    method = 'rf', 
+                    metric = 'Accuracy', 
+                    tuneGrid = tunegrid,
+                    trControl = control)
+# print(rf_default)
+f_hat <- factor(predict(rf_default, newdata = prova_10_train))
+y_true <- factor(prova_10_train$y)
+F1 = confusionMatrix(f_hat, y_true, mode = "everything", positive="1")$byClass[7]
+
+
+# STEP 3:
+# Si usa il test per ottenere M campioni bootstrap, e per ogni campione si fa il predict e si calcola l'F1 score. Si confronta F1_j con F1 per ognuno dei M campioni, e alla fine si prende la mediana.
+LOCO_scores <- list()
+LOCO_punctual <- c()
+
+for(j in 1:(ncol(LOCO_variables)-1)){
+  rf_j <- train(y ~. ,
+                data = prova_10_train[, -j],
+                method = 'rf',
+                metric = 'Accuracy',
+                tuneGrid = tunegrid,
+                trControl = control)
+  
+  vec <- c()
+  
+  for(m in 1:50){
+    idx_boot <- sample(1:119, size = 119, replace = T)
+    sample_boot <- prova_10_test[idx_boot, ]
+    
+    f_hat_j <- factor(predict(rf_j, newdata = sample_boot))
+    y_true <- factor(sample_boot$y)
+    
+    F1_j = confusionMatrix(f_hat_j, y_true, mode = "everything", positive="1")$byClass[7]
+    
+    vec <- c(vec, F1_j)
+  }
+  
+  LOCO_scores[[j]] <- c(mean(F1-vec) - 2*sd(F1-vec), mean(F1-vec) + 2*sd(F1-vec))
+  LOCO_punctual <- c(LOCO_punctual, median(F1-vec))
+  
+}
+
+LOCO_scores
+LOCO_punctual
+
+plot(1, cex = 0, xlim = c(1, 10), ylim = c(-0.05, 1.05))
+grid()
+abline(h = 0, lty = 2)
+for(i in 1:10){
+  lines(x = c(i, i), y = c(unlist(LOCO_scores[i]) ), lwd = 2)
+}
+
+points(1:10, LOCO_punctual, pch = 20, col = 'red')
+
+
+#### GRAFICO FATTO BENE
+ 
+library(ggplot2)
+
+df <- data.frame(do.call(rbind, LOCO_scores))
+
+x = seq(0, 10, length.out = 10)
+y = seq(0, 1, length.out=10)
+brks <- seq(0, 1, 0.1)
+ggplot(data = df)+
+  geom_errorbar(alpha=1.5, linetype=1, size=0.8,
+                ymin=df$X1,
+                ymax=df$X2,
+                mapping = aes(x=x,y=y),
+                color="#0e668b")+
+  coord_flip()+
+  scale_y_continuous(breaks = brks, labels = brks)+
+  scale_x_continuous(breaks = seq(0, 10, 1), labels = seq(0, 10, 1))+
+  labs(title="Loco confidence intervals",
+       x = "Variable Number",
+       y = "LOCO score")+ 
+  theme(text = element_text(family = "serif"), 
+        plot.title = element_text(hjust=0.5),
+        #plot.background=element_rect(fill="white"),
+        panel.background=element_rect(fill="#fafafa"),
+        panel.grid.minor=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_line(),
+        axis.ticks=element_blank())
+
+
+
+
 # Predict -----------------------------------------------------------------
 
 test <- read_csv("test_hw03.csv")
@@ -314,21 +467,11 @@ test_roi <- test[, -c(1:3)]
 
 hist(rowMeans(test_roi))
 
-# test_roi_belle = test_roi[abs(rowMeans(test_roi)) <= 2, ]
-# test_info_belle = test_info[abs(rowMeans(test_roi)) <= 2, ]
-
-# Extract the roi names
-# roi <- unique(
-#   sub(".*_", "", colnames(test_roi))
-# )
-
 # Scale
 # 1)
 test_roi_scale = data.frame(t(apply(test_roi, 1, scale)))
 
 # 2)
-# seq(1, 13340, by = 115)
-# test_roi[i, j:j+114]
 
 q1_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
@@ -371,33 +514,21 @@ min_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function
 }))
 
 
-
-# roi <- unique(
-#   sub(".*_", "", colnames(test_roi))
-# )
-
 # Ora posso inserirle nell'altra tabella:
 colnames(q1_roi_test) = paste0('q1_', roi) # molto meglio
 colnames(q2_roi_test) = paste0('q2_', roi)
 colnames(q3_roi_test) = paste0('q3_', roi)
-# colnames(sd_roi_test) = paste0('sd_', roi)
-# colnames(mean_roi_test) = paste0('mean_', roi)
-#colnames(cor_roi) = paste0('cor_', roi)
 colnames(max_roi_test) = paste0('max_', roi)
 colnames(min_roi_test) = paste0('min_', roi)
 
-#test_medie <- as.data.frame(medie_roi)
 
 prova_test = cbind(test_info, q1_roi_test, q2_roi_test, q3_roi_test, min_roi_test, max_roi_test)
 prova_test = prova_test[, -1]
-# rm(test)
 
 prova_test$sex = as.factor(ifelse(prova_test$sex == 'male', 1, 0))
-# prova$y = as.factor(ifelse(prova$y == 'autism', 1, 0))
 
 colnames(prova_10_corr)[1:50] # --> sono le nostre variabili, senza la y
 prova_10_test <- prova_test[, colnames(prova_10_corr)[1:50]]
-#prova_10 <- prova_10[, !(names(prova_10) %in% c('q1_5302'))]
 
 id <- test$id
 target = predict(rf_default10, newdata = prova_10_test)
@@ -406,4 +537,4 @@ target = ifelse(target == 1, 'autism', 'control')
 preds_g11 = data.frame('id' = id, 'target' = target)
 table(preds_g11$target)
 
-write.csv(preds_g11, file = "preds_g11_12.csv", row.names = FALSE)
+write.csv(preds_g11, file = "preds_g11_13.csv", row.names = FALSE)
