@@ -1,3 +1,12 @@
+# QUI HO SEMPLICEMENTE FATTO COSì:
+# - RUNNATO UN PRIMO MODELLO CON TUTTE LE VARIABILI
+# CONSIDERATO Q1, Q2, Q3, MIN E MAX
+# FATTO LA VARIABLE IMPORTANCE E PLOTTATO IL RISULTATO
+# NOTATO UN GOMITO A 50, E SELEZIONATO LE PRIME 50 VARIABILI
+# USATO IL MODELLO CON LE 50 VARIABILI
+# Niente selezione tramite LOCO
+
+
 #     Statistical Learning Homework 2, group 11
 # Susanna Bravi, Simone Facchiano, Raffaele Liguori
 
@@ -60,15 +69,15 @@ q3_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(star
 #   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
 # }))
 
-# max_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=max)
-# }))
-# 
-# min_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=min)
-# }))
+max_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=max)
+}))
+
+min_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+  end <- start + 115 - 1
+  apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=min)
+}))
 
 
 
@@ -82,8 +91,8 @@ colnames(q2_roi) = paste0('q2_', roi)
 colnames(q3_roi) = paste0('q3_', roi)
 #colnames(sd_roi) = paste0('sd_', roi)
 #colnames(mean_roi) = paste0('mean_', roi)
-# colnames(max_roi) = paste0('max_', roi)
-# colnames(min_roi) = paste0('min_', roi)
+colnames(max_roi) = paste0('max_', roi)
+colnames(min_roi) = paste0('min_', roi)
 
 
 prova = cbind(train_info, q1_roi, q2_roi, q3_roi)
@@ -108,7 +117,7 @@ set.seed(123)
 mtry <- round(sqrt(ncol(prova) - 1)) # optimal number of columns
 
 # tunegrid <- expand.grid(.mtry=mtry)
-tunegrid <- expand.grid(.mtry=c(6, 9, 19)) # 21, 25
+tunegrid <- expand.grid(.mtry=c(6, 9, 19, 21, 25))
 
 rf_default <- train(y ~. , 
                     data = prova, 
@@ -121,7 +130,8 @@ plot(rf_default)
 
 
 # VARIABLE IMPORTANCE
-baseline_accuracy <- rf_default$results$Accuracy
+best_mtry <- as.numeric(rf_default$bestTune)
+baseline_accuracy <- rf_default$results$Accuracy[rf_default$results$mtry == best_mtry]
 
 varImp(rf_default, scale = F)
 var_imp = data.frame(varImp(rf_default, scale = F)$importance)
@@ -130,38 +140,15 @@ var_imp <- data.frame(var_imp[order(var_imp$Overall, decreasing = TRUE), ])
 
 plot(var_imp[, 1], type = 'l', lwd = 2.5, col = 'steelblue')
 grid()
-abline(v = 50, col = 'red', lwd = 2, lty = 2)
+abline(v = c(10, 50), col = 'red', lwd = 1.7, lty = 2)
 
-top_variables = var_imp[1:10, 2]
-
-
-# Proviamo a migliorare i parametri ---------------------------------------
-
-prova_50 <- prova[, c(top_variables)]
-prova_50$y <- prova$y
-
-# Usiamo un control più ciotto
-control50 <- trainControl(method='repeatedcv', 
-                        number=10, 
-                        repeats=3,
-                        search = 'random')
-# Mettiamo più valori di mtry
-rf_default50 <- train(y ~. , 
-                    data = prova_50, 
-                    method = 'rf', 
-                    metric = 'Accuracy', 
-                    #tuneGrid = tunegrid,
-                    tuneLength = 20,
-                    trControl = control50)
-print(rf_default50)
-
-
+top_variables = var_imp[1:50, 2]
 
 # LOCO -------------------------------------------------------------------
 
 top_variables
 
-# PARTE 1: CONTROLLARE LA CORRELAZIONE TRA LE VARIABILI
+# PARTE 1: CONTROLLARE LA CORRELAIZONE TRA LE VARIABILI
 
 prova_10 <- prova[, c(top_variables)]
 prova_10_corr <- prova[, c(top_variables)]
@@ -183,17 +170,17 @@ prova_10_corr$y <- prova$y
 
 
 control <- trainControl(method='cv', 
-                        number = 5)
+                        number = 10)
 
 #tunegrid <- expand.grid(.mtry=9)
-tunegrid <- expand.grid(.mtry=c(6, 9, 19, 21, 25))
+tunegrid <- expand.grid(.mtry=c(6, 7, 8, 9))
 rf_default10 <- train(y ~. , 
-                    data = prova_10_corr, 
-                    method = 'rf', 
-                    metric = 'Accuracy', 
-                    tuneGrid = tunegrid,
-                    #ntree = 1000,
-                    trControl = control)
+                      data = prova_10_corr, 
+                      method = 'rf', 
+                      metric = 'Accuracy', 
+                      tuneGrid = tunegrid,
+                      #ntree = 1000,
+                      trControl = control)
 print(rf_default10)
 
 set.seed(123)
@@ -224,23 +211,6 @@ data.frame(cbind('Missing Variable' = variables_name, 'Delta Accuracy' = accurac
 
 # Codice Raffaele per vedere il migliore ----------------------------------
 
-set.seed(123)
-control50 <- trainControl(method='repeatedcv', 
-                          number=10, 
-                          repeats=3,
-                          search = 'random')
-tunegrid <- expand.grid(.mtry=c(6, 9, 12, 15, 19, 21, 25))
-rf_default10 <- train(y ~. , 
-                      data = prova_10_corr, 
-                      method = 'rf', 
-                      metric = 'Accuracy', 
-                      tuneGrid = tunegrid,
-                      #ntree = 1000,
-                      trControl = control50)
-print(rf_default10)
-baseline_accuracy <- rf_default10$results$Accuracy[2]
-
-
 idx <- sample(1:600,size=120, replace=F)
 prova_10_train <- prova_10_corr[-idx,]
 prova_10_test <- prova_10_corr[idx,]
@@ -253,7 +223,7 @@ for(j in 1:(ncol(prova_10_corr) - 1)){
   variables <- c(variables, colnames(prova_10_corr)[j])
   
   mtry <- round(sqrt(ncol(prova_10_corr) - 1)) # optimal number of variables
-  tunegrid <- expand.grid(.mtry=25) # <-- 25 era il numero che garantiva l'accuracy migliore
+  tunegrid <- expand.grid(.mtry=19) # <-- 19 era il numero che garantiva l'accuracy migliore
   mdl <- train(y ~. , 
                data = prova_10_train[, -j], 
                method = 'rf', 
@@ -265,12 +235,12 @@ for(j in 1:(ncol(prova_10_corr) - 1)){
   accuracies <- c(accuracies, baseline_accuracy - mdl$results$Accuracy)
 }
 
-data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = round(accuracies, 5), 'accuracy'= round(accuracies+baseline_accuracy, 5), 'test_accuracy'= round(accuracy_test, 5)))
+data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = round(accuracies, 3), 'accuracy'= round(accuracies+baseline_accuracy, 3), 'test_accuracy'= round(accuracy_test, 3)))
 
 ############
 
-# Bene! Proviamo a togliere la variabile q1_6222
-prova_10_corr <- prova_10_corr[, !(names(prova_10_corr) %in% c('q1_6222'))]
+# Bene! Proviamo a togliere la variabile q2_8101
+prova_10_corr <- prova_10_corr[, !(names(prova_10_corr) %in% c('q2_8101'))]
 tunegrid <- expand.grid(.mtry=c(6, 9, 15, 19, 21, 25))
 rf_default10 <- train(y ~. , 
                       data = prova_10_corr, 
@@ -281,21 +251,6 @@ rf_default10 <- train(y ~. ,
                       trControl = control)
 print(rf_default10)
 rf_default10
-
-
-
-# Proviamo a togliere la 6 variabile --------------------------------------
-
-prova_10_corr <- prova_10_corr[, -6]
-tunegrid <- expand.grid(.mtry=c(3, 6))
-rf_default10 <- train(y ~. , 
-                      data = prova_10_corr, 
-                      method = 'rf', 
-                      metric = 'Accuracy', 
-                      tuneGrid = tunegrid,
-                      #ntree = 50,
-                      trControl = control)
-print(rf_default10)
 
 # Correlazione tra variabili ----------------------------------------------
 
@@ -340,11 +295,11 @@ data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = accuracies),
 
 tunegrid <- expand.grid(.mtry=c(6, 9, 19, 21))
 mdl_submission <- train(y ~. , 
-             data = small_dataset[, -10], 
-             method = 'rf', 
-             metric = 'Accuracy', 
-             tuneGrid = tunegrid, 
-             trControl = control)
+                        data = small_dataset[, -10], 
+                        method = 'rf', 
+                        metric = 'Accuracy', 
+                        tuneGrid = tunegrid, 
+                        trControl = control)
 
 print(mdl_submission)
 
@@ -390,15 +345,15 @@ q3_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.75)
 }))
 
-sd_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
-  end <- start + 115 - 1
-  apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=sd)
-}))
-
-mean_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
-  end <- start + 115 - 1
-  apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
-}))
+# sd_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+#   end <- start + 115 - 1
+#   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=sd)
+# }))
+# 
+# mean_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+#   end <- start + 115 - 1
+#   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
+# }))
 
 # cor_roi <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
 #   end <- start + 115 - 1
@@ -425,23 +380,23 @@ min_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function
 colnames(q1_roi_test) = paste0('q1_', roi) # molto meglio
 colnames(q2_roi_test) = paste0('q2_', roi)
 colnames(q3_roi_test) = paste0('q3_', roi)
-colnames(sd_roi_test) = paste0('sd_', roi)
-colnames(mean_roi_test) = paste0('mean_', roi)
+# colnames(sd_roi_test) = paste0('sd_', roi)
+# colnames(mean_roi_test) = paste0('mean_', roi)
 #colnames(cor_roi) = paste0('cor_', roi)
 colnames(max_roi_test) = paste0('max_', roi)
 colnames(min_roi_test) = paste0('min_', roi)
 
 #test_medie <- as.data.frame(medie_roi)
 
-prova_test = cbind(test_info, q1_roi_test, q2_roi_test, q3_roi_test)
+prova_test = cbind(test_info, q1_roi_test, q2_roi_test, q3_roi_test, min_roi_test, max_roi_test)
 prova_test = prova_test[, -1]
 # rm(test)
 
 prova_test$sex = as.factor(ifelse(prova_test$sex == 'male', 1, 0))
 # prova$y = as.factor(ifelse(prova$y == 'autism', 1, 0))
 
-colnames(prova_10_corr)[1:58] # --> sono le nostre variabili, senza la y
-prova_10_test <- prova_test[, colnames(prova_10_corr)[1:58]]
+colnames(prova_10_corr)[1:50] # --> sono le nostre variabili, senza la y
+prova_10_test <- prova_test[, colnames(prova_10_corr)[1:50]]
 #prova_10 <- prova_10[, !(names(prova_10) %in% c('q1_5302'))]
 
 id <- test$id
@@ -451,4 +406,4 @@ target = ifelse(target == 1, 'autism', 'control')
 preds_g11 = data.frame('id' = id, 'target' = target)
 table(preds_g11$target)
 
-write.csv(preds_g11, file = "preds_g11_10.csv", row.names = FALSE)
+write.csv(preds_g11, file = "preds_g11_12.csv", row.names = FALSE)
