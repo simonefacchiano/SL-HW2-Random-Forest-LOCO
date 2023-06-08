@@ -1,6 +1,6 @@
 ---
 title: "HW2_Bravi_Facchiano_Liguori"
-author: "simone facchiano"
+author: "Group 11"
 date: "6/7/2023"
 output: html_document
 ---
@@ -9,257 +9,299 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Packets
+## Initialization
 
-```{r}
+First, we imported the packages and data.
+
+
+```{r, echo = FALSE}
+
 library(readr)
 library(ggplot2)
 library(corrplot)
 library(caret)
 library(dplyr)
+library(ggcorrplot)
 
 ```
 
-## Initialization
 
-First, we imported the packages and data.
+```{r pressure, echo=FALSE, warnings = FALSE, results = 'hide'}
 
-```{r pressure, echo=FALSE}
-setwd("~/Desktop/Data Science/SL/Homework 2")
+train <- read_csv("/Users/simonefacchiano/Desktop/Data Science/SL/Homework 2/train_hw03.csv")
 
-train <- read_csv("train_hw03.csv")
 ```
 
 
 ## Preprocessing
 
-At this point we began with an initial analysis of the data. The first thing we noticed was the fact that different patients seemed to report measurements on different scales. Most of them all had values close to zero, while others (for example, patient number 2) showed extremely larger values. <br>
-
-Since our ultimate goal was to construct a classifier capable of distinguishing between the two classes 'autism' and 'control,' we decided to standardize (by row) our dataset. This ensured that we had comparable data between them, and we could proceed with our work.
+At this point we began with an initial analysis of the data. The first thing we noticed was the fact that different patients seemed to report measurements on different scales. Most of all had values close to zero, while others (for example, patient number 2) showed extremely larger values. <br>
 
 ```{r}
-# Problema: i valori (alcuni intorno allo 0, altri del tutto sballati)
-hist(rowMeans(train[, -c(1:4)]), breaks = 20) # ad esempio, qui la seconda riga ha media -3, mentre tutte le altre sono intorno allo 0
 
-# Creaiamo una copia del dataset, ma senza le prime 4 colonne
+hist(rowMeans(train[, -c(1:4)]), 
+     breaks = 10, xlab = 'Mean', border = F, col = 'steelblue',
+     prob = T, main = 'Row Means')
+
+```
+
+Since our ultimate goal was to construct a classifier capable of distinguishing between the two classes "autism" and "control", we decided to standardize by row our dataset. This ensured that we had comparable data, and we could proceed with our work.
+
+```{r}
+
+# We partition our dataset into two chucks. The second chunk contains the quantitative variables that we are going to standardize
 train_info <- train[, c(1:4)]
 train_roi <- train[, -c(1:4)]
 
-hist(rowMeans(train_roi), border = F)
-
 # Scale
-# 1)
 train_roi_scale = data.frame(t(apply(train_roi, 1, scale)))
+
 ```
 
-Standardization was only our first step toward building a dataset that would allow us to build a suitable classifier. <br>
-Indeed, although a high number of variables is generally a good starting point for building a good model, we cannot forget the danger of overfitting that would compromise our results. <br>
+Standardization was only our first step toward building a dataset that would allow us to create a suitable classifier. <br>
+Indeed, although a high number of variables is generally a good starting point for building a good model, we cannot forget the danger of *overfitting* that would compromise our results. <br>
 
-We therefore opted for a dimensional reduction in our data. <br>
+We therefore opted for a *dimensionality reduction* in our data. <br>
 The most immediate idea was to use PCA, but we ran into a number of problems. Indeed, not only was it not easy to identify a simple 'cut-off' point from the graph of the cumulative variance of the principal components, but it was also not easy to give an interpretation of the variables we were using. And since we had to select the most important variables with specific techniques, this could be quite a problem. <br>
 
 We decided to change our strategy. <br>
-Since the rows of the dataset were in fact so many time-series concatenated one after the other, the choice fell on extracting some indices for each time-series, and to use them as new features for our model. <br>
-Since the rows had been standardized, taking the mean and standard deviation would not have made sense: we therefore opted for more robust position indicators, such as quartiles, maximum and minimum. <br>
+Since the rows of the dataset were many time-series concatenated one after the other, we had chosen to extract some indices for each time-series, and to use them as new features for our model. <br>
+In our opinion, since the rows had been standardized, taking the mean and standard deviation would not have made sense: we therefore opted for more robust and meaningful position indicators, such as quartiles, maximum and minimum. <br>
 These indices were extracted for each historical series, and then put together to create a new reduced dataset.
 
 ```{r}
-# 2)
 
-q1_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+# Extract the indicators
+q1_reduced<- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.25)
 }))
 
-q2_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+q2_reduced <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.5)
 }))
 
-q3_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+q3_reduced <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.75)
 }))
 
-# sd_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=sd)
-# }))
-
-# mean_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
-# }))
-
-max_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+max_reduced <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=max)
 }))
 
-min_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
+min_reduced <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(train_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=min)
 }))
 
 
-
+# Combine the indicators all together and rename the variables
 roi <- unique(
   sub(".*_", "", colnames(train_roi))
 )
 
-# Ora posso inserirle nell'altra tabella:
-colnames(q1_roi) = paste0('q1_', roi) # molto meglio
-colnames(q2_roi) = paste0('q2_', roi)
-colnames(q3_roi) = paste0('q3_', roi)
-#colnames(sd_roi) = paste0('sd_', roi)
-#colnames(mean_roi) = paste0('mean_', roi)
-colnames(max_roi) = paste0('max_', roi)
-colnames(min_roi) = paste0('min_', roi)
+colnames(q1_reduced) = paste0('q1_', roi)
+colnames(q2_reduced) = paste0('q2_', roi)
+colnames(q3_reduced) = paste0('q3_', roi)
+colnames(max_reduced) = paste0('max_', roi)
+colnames(min_reduced) = paste0('min_', roi)
 
+new_data = cbind(train_info, q1_reduced, q2_reduced, q3_reduced, min_reduced, max_reduced)
+new_data = new_data[, -1]
 
-prova = cbind(train_info, q1_roi, q2_roi, q3_roi, min_roi, max_roi)
-prova = prova[, -1]
-
-prova$sex = as.factor(ifelse(prova$sex == 'male', 1, 0))
-prova$y = as.factor(ifelse(prova$y == 'autism', 1, 0))
+new_data$sex = as.factor(ifelse(new_data$sex == 'male', 1, 0))
+new_data$y = as.factor(ifelse(new_data$y == 'autism', 1, 0))
 
 ```
 
 ## The Model: Random Forest for Classification
 
-At this point we were ready to build our model. The choice that seemed most suitable to us was to use a Random Forest. Moreover, despite the reduction in size of the dataset, the number of variables still appeared quite large. Therefore, we chose to use again the caret library, which integrates within it a method specifically referred to the Random Forest.
+At this point we were ready to build our model. The choice that seemed most suitable to us was to use a Random Forest. Moreover, despite the reduction in size of the dataset, the number of variables still appeared quite large. Therefore, we chose to use again the caret library.
 
 ```{r}
+
+set.seed(123)
+
+# 1) Control: We opted for a cross-validation as resampling method with 5 folds in order to obtain a good estimate
 control <- trainControl(method='cv', 
                         number = 5)
 
+# 2) We used the Accuracy as our metric
 metric <- "Accuracy"
-set.seed(123)
-mtry <- round(sqrt(ncol(prova) - 1)) # optimal number of variables for the bootstrap
 
+# 3) We set the parameter mtry as the square root of the number of columns of the training dataset, without counting the response variable. 
+mtry <- round(sqrt(ncol(new_data) - 1)) # Optimal number of Randomly Selected Predictors for the Random Forest
 tunegrid <- expand.grid(.mtry=mtry)
 
-rf_default <- train(y ~. , 
-                    data = prova, 
+# 4) Fit the model with all the variables and without explicitly tuning the parameters
+model1 <- train(y ~. , 
+                    data = new_data, 
                     method = 'rf', 
                     metric = 'Accuracy', 
                     tuneGrid = tunegrid,
                     trControl = control)
-print(rf_default)
+
+# 5) Print the output of the model
+print(model1)
 ```
 
-One of the reasons the Random Forest seemed like a good idea is that we can easily extract a measure of Variable Importance from the model. Once this quantity was calculated for all variables we plotted the result. It seemed reasonable to us to focus on the first 50 variables, which offered the right trade-off between model simplicity and good performance.
+Our first model with all the variables doesn't perform very well. We have an accuracy of 58%, and a Kappa statistic (that is a measure of agreement between the classifications in our model and the actual classes) of 0.13, that is only slightly bigger than the random choice valued as 0.
+
+
+## Variable Importance
+
+One of the reasons why Random Forest seemed a good idea is that we can easily extract a measure of **Variable Importance** directly from the model, using an index called Mean Decrease Accuracy (MDA). Once this quantity was computed for all variables, we plotted the result. It seemed reasonable to us to focus on the first 50 variables, which offered the right trade-off between model simplicity and good performance.
 
 ```{r}
-# VARIABLE IMPORTANCE
-best_mtry <- as.numeric(rf_default$bestTune)
-baseline_accuracy <- rf_default$results$Accuracy[rf_default$results$mtry == best_mtry]
 
-var_imp = data.frame(varImp(rf_default, scale = F)$importance)
+# Extract the variable importance for each feature with the default caret function
+var_imp = data.frame(varImp(model1, scale = F)$importance)
 var_imp$variable = rownames(var_imp)
 var_imp <- data.frame(var_imp[order(var_imp$Overall, decreasing = TRUE), ])
 
-plot(var_imp[, 1], type = 'l', lwd = 2.5, col = 'steelblue', ylab = 'Variable Importance')
-grid()
-abline(v = 50, col = 'red', lwd = 1.7, lty = 2)
+# Plot the results
+index = seq(1,582,by=1)
+df_var_imp = data.frame(var_imp,index)
+ggplot(data = df_var_imp,aes(y=df_var_imp$Overall,x=df_var_imp$index))+
+  geom_line(aes(y=df_var_imp$Overall,x=df_var_imp$index),size=1,col="#0e668b")+
+  geom_segment(aes(x=50,y=0,yend = 0.7509073,xend=50),size=0.7,linetype=5,col="#a3c4dc",lineend = 'round')+
+  geom_segment(aes(x=0,y=0.7509073,yend = 0.7509073,xend=50),size=0.7,linetype=5,col="#a3c4dc")+
+  geom_point(aes(x=50,y=0.7509073),col="#a3c4dc",shape=1,size=3)+
+  labs(title="Variable Importance",
+       x = "Index",
+       y = "Variable importance")+ 
+  theme(text = element_text(family = "serif"), 
+        plot.title = element_text(hjust=0.5),
+        panel.background=element_rect(fill='#e7eaee'))
 
+# Take the first 50 variables
 top_variables = var_imp[1:50, 2]
+
 ```
 
-Having reached this point, we built a new model using the 50 variables just extracted. The only hyperparameter we tried to vary in our tunegrid concerns the number of variables sampled during the costruction of the trees. As expected, the parameter value that provided the best performance was the one closest to sqrt(ncol).
+Having reached this point, we built a new model using the 50 variables just extracted. The only hyperparameter we tried to vary in our parameter grid concerns the number of variables sampled during the construction of the trees (`mtry`). As expected, the parameter value that provided the best performance was the one closest to square root of the number of columns of the new dataset.
 
 ```{r}
-# Nuovo modello con 50 variabili ------------------------------------------
 
-prova_10_corr <- prova[, c(top_variables)]
-prova_10_corr$y <- prova$y
+new_data_50 <- new_data[, c(top_variables)]
+new_data_50$y <- new_data$y
 
+# This time, to obtain a higher precision for the choice of the best parameter, we decided to use a repeated cross validation
 control <- trainControl(method='repeatedcv', 
                         number=10, 
                         repeats=3,
                         search = 'random')
 
+# We search over 4 different values
 tunegrid <- expand.grid(.mtry=c(6, 7, 8, 9))
-rf_default10 <- train(y ~. , 
-                      data = prova_10_corr, 
+
+# We build the second model
+model50 <- train(y ~. , 
+                      data = new_data_50, 
                       method = 'rf', 
                       metric = 'Accuracy', 
                       tuneGrid = tunegrid,
                       trControl = control)
-print(rf_default10)
+# Print the result
+print(model50)
 ```
 
-Having reached this point, we can consider our model finished. However, we are curious to find out whether the Variable Importance we obtained from the random forest coincides with the scores we can obtain from the LOCO procedure
-[ SPIEGA LA LOCO ]
+At this point, we can consider our model finished. However, we are curious to find out whether the Variable Importance we obtained from the Random Forest coincides with the scores we can obtain from the LOCO procedure.
+
 
 ## LOCO: an alternative view on Variable Importance
 
+**LOCO** Inference is a procedure developed by Lei et al. (2016), which is proposed as an alternative measure of variable importance. <br>
+This procedure consists in estimating a function $\hat{f}_{n_1}$ over the entire training dataset, and comparing an arbitrary loss of it (in our case we chose to use the *F1 score*) with the one of a function $\hat{f}_{n_1}^{-j}$, obtained by removing one variable j at a time from the dataset. <br>
+
+To reduce computational costs, we have selected only the top variables by their importance. To avoid biases in the results, we checked the presence of highly correlated variables before evaluating the LOCO scores. In fact, citing the book [Limitations of Interpretable Machine Learning Methods](https://slds-lmu.github.io/iml_methods_limitations/pfi-correlated.html), «If you leave out one feature that is perfectly correlated to the other, the performance will be the same as before. Since the feature which is still in the data set contains exactly the same information as the one left out there is no alteration in performance».
+
 ```{r}
-prova_10 <- prova[, c(top_variables[1:13], 'y')] # <-- OUR TOP VARIABLES + FLOP variables
+
+# Build a reduced dataset with only the most important features
+new_data_10 <- new_data[, c(top_variables[1:13], 'y')]
 
 # STEP 0: check for highly correlated variables
-corrplot(cor(prova_10[, -14]))
+ggcorrplot(round(cor(new_data_10[, -14]),1), 
+           hc.order = TRUE, type = "lower",lab = TRUE,
+           lab_size = 2.5,
+           ggtheme = ggplot2::theme_gray,
+           colors = c("#6D9EC1", "white", "red"),)+
+  labs(title="Correlation")+ 
+  theme(text = element_text(family = "serif"), 
+        plot.title = element_text(hjust=0.5),
+        panel.background=element_rect(fill='#e7eaee'),
+        axis.text.x = element_text(size = 9),
+        axis.text.y = element_text(size = 9))
 
+high_cor_pairs <- which(
+  abs(cor(new_data_10[, -14])) > 0.6 & cor(new_data_10[, -14]) < 0.99, 
+  arr.ind = TRUE)
 
-high_cor_pairs <- which(abs(cor(prova_10[, -14])) > 0.6 & cor(prova_10[, -14]) < 0.99, arr.ind = TRUE)
 discard_variables <- c()
 for (i in 1:nrow(high_cor_pairs)) {
-  variable1 <- colnames(cor(prova_10[, -14]))[high_cor_pairs[i, 1]]
-  variable2 <- colnames(cor(prova_10[, -14]))[high_cor_pairs[i, 2]]
+  variable1 <- colnames(cor(new_data_10[, -14]))[high_cor_pairs[i, 1]]
+  variable2 <- colnames(cor(new_data_10[, -14]))[high_cor_pairs[i, 2]]
   
   ifelse(var_imp[variable1, 'Overall'] > var_imp[variable2, 'Overall'],
          discard_variables <- c(discard_variables, variable2),
          discard_variables <- c(discard_variables, variable1))
 }
 
+# Discard highly correlated variables
 discard_variables <- unique(discard_variables)
 
-LOCO_variables <- prova_10 %>%
+LOCO_variables <- new_data_10 %>%
   select(-one_of(discard_variables))
 
-# STEP 1: partition in train e test
-idx <- createDataPartition(LOCO_variables$y, p = 0.8, list = FALSE)
-prova_10_train <- LOCO_variables[-idx,] # 80%
-prova_10_test <- LOCO_variables[idx,] # 20%
+```
 
-# STEP 2: Run algorithm to compute estimate fˆ on first part D1
-mtry <- round(sqrt(ncol(prova_10_train) - 1)) # optimal number of columns
+```{r}
+
+# STEP 1: partition in train and test
+idx <- createDataPartition(LOCO_variables$y, p = 0.8, list = FALSE)
+new_data_10_train <- LOCO_variables[-idx,] # 80%
+new_data_10_test <- LOCO_variables[idx,] # 20%
+
+# STEP 2: Run algorithm to compute estimate f_hat on D1
+mtry <- round(sqrt(ncol(new_data_10_train) - 1))
 tunegrid <- expand.grid(.mtry=mtry)
 control <- trainControl(method='cv', 
                         number = 5)
 
-rf_default <- train(y ~. , 
-                    data = prova_10_train, 
+model10 <- train(y ~. , 
+                    data = new_data_10_train, 
                     method = 'rf', 
                     metric = 'Accuracy', 
                     tuneGrid = tunegrid,
                     trControl = control)
-# print(rf_default)
-f_hat <- factor(predict(rf_default, newdata = prova_10_train))
-y_true <- factor(prova_10_train$y)
+f_hat <- factor(predict(model10, newdata = new_data_10_train))
+y_true <- factor(new_data_10_train$y)
 F1 = confusionMatrix(f_hat, y_true, mode = "everything", positive="1")$byClass[7]
 
 
-# STEP 3:
-# Si usa il test per ottenere M campioni bootstrap, e per ogni campione si fa il predict e si calcola l'F1 score. Si confronta F1_j con F1 per ognuno dei M campioni, e alla fine si prende la mediana.
+# STEP 3: we use the test to obtain M bootstrap samples, and for each sample we predict and evaluate the F1 score. We compare F1_j (that is the F1 score computed without the j-th variable) with the baseline F1 score for each of the M samples, and we finally take the median.
 LOCO_scores <- list()
 LOCO_punctual <- c()
+M <- 100
 
 for(j in 1:(ncol(LOCO_variables)-1)){
-  rf_j <- train(y ~. ,
-                data = prova_10_train[, -j],
+  model_j <- train(y ~. ,
+                data = new_data_10_train[, -j],
                 method = 'rf',
                 metric = 'Accuracy',
                 tuneGrid = tunegrid,
                 trControl = control)
-  
   vec <- c()
   
-  for(m in 1:50){
+  for(m in 1:M){
     idx_boot <- sample(1:119, size = 119, replace = T)
-    sample_boot <- prova_10_test[idx_boot, ]
+    sample_boot <- new_data_10_test[idx_boot, ]
     
-    f_hat_j <- factor(predict(rf_j, newdata = sample_boot))
+    f_hat_j <- factor(predict(model_j, newdata = sample_boot))
     y_true <- factor(sample_boot$y)
     
     F1_j = confusionMatrix(f_hat_j, y_true, mode = "everything", positive="1")$byClass[7]
@@ -272,11 +314,9 @@ for(j in 1:(ncol(LOCO_variables)-1)){
   
 }
 
-LOCO_scores
-LOCO_punctual
 ```
 
-We can also plot the LOCO scores:
+We can plot the LOCO scores:
 
 ```{r}
 
@@ -296,27 +336,31 @@ ggplot(data = df,
   coord_flip()+
   scale_y_continuous(breaks = brks, labels = brks)+
   scale_x_continuous(breaks = seq(0, 10, 1), labels = seq(0, 10, 1))+
-  labs(title="Loco confidence intervals",
+  labs(title="LOCO confidence intervals",
        x = "Variable Number",
        y = "LOCO score")+ 
   theme(text = element_text(family = "serif"), 
         plot.title = element_text(hjust=0.5),
-        #plot.background=element_rect(fill="white"),
-        panel.background=element_rect(fill="#fafafa"),
+        panel.background=element_rect(fill='#e7eaee'),
         panel.grid.minor=element_blank(),
         panel.grid.major.y=element_blank(),
         panel.grid.major.x=element_line(),
         axis.ticks=element_blank())
 ```
 
+For each score, given the distribution obtained by the bootstrap samples, we also plotted the confidence interval for each LOCO score. <br>
+Making a comparison between these scores and those extracted directly from the model is not easy. In fact, in this case we are analyzing the importance of the first 10 variables on a dataset with 50 features, whereas the previous Variable Importance considered 583 features at the start. <br>
+From this graph, however, we can infer how the first 10 variables show LOCO scores that are quite similar to each other, and all around the value 0.4. <br>
+
+
 ## Predictions
 
-A questo punto, siamo pronti per fare le nostre previsioni. Importiamo dunque il test set, facciamo dimensionality reduction ed estraiamo le 50 variabili più importanti.
+We are finally ready to make predictions on our test set. <br>
+We therefore import the dataset, reduce the dimensionality by exracting the quartiles and the maximum and minimum for each time series and fit the model.
 
 ```{r}
-test <- read_csv("test_hw03.csv")
+test <- read_csv("/Users/simonefacchiano/Desktop/Data Science/SL/Homework 2/test_hw03.csv")
 head(test)
-
 
 test_info <- test[, c(1:3)]
 test_roi <- test[, -c(1:3)]
@@ -324,80 +368,62 @@ test_roi <- test[, -c(1:3)]
 hist(rowMeans(test_roi))
 
 # Scale
-# 1)
 test_roi_scale = data.frame(t(apply(test_roi, 1, scale)))
 
-# 2)
-
-q1_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+# Dimensionality reduction
+q1_reduced_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.25)
 }))
 
-q2_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+q2_reduced_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.5)
 }))
 
-q3_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+q3_reduced_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=quantile, probs=0.75)
 }))
 
-# sd_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=sd)
-# }))
-# 
-# mean_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=mean)
-# }))
-
-# cor_roi <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
-#   end <- start + 115 - 1
-#   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=cor)
-# }))
-
-max_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+max_reduced_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=max)
 }))
 
-min_roi_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
+min_reduced_test <- as.data.frame(sapply(seq(1, ncol(test_roi_scale), 115), function(start) {
   end <- start + 115 - 1
   apply(test_roi_scale[, start:end, drop = F], MARGIN = 1, FUN=min)
 }))
 
 
-# Ora posso inserirle nell'altra tabella:
-colnames(q1_roi_test) = paste0('q1_', roi) # molto meglio
-colnames(q2_roi_test) = paste0('q2_', roi)
-colnames(q3_roi_test) = paste0('q3_', roi)
-colnames(max_roi_test) = paste0('max_', roi)
-colnames(min_roi_test) = paste0('min_', roi)
+# Rename the variables
+colnames(q1_reduced_test) = paste0('q1_', roi)
+colnames(q2_reduced_test) = paste0('q2_', roi)
+colnames(q3_reduced_test) = paste0('q3_', roi)
+colnames(max_reduced_test) = paste0('max_', roi)
+colnames(min_reduced_test) = paste0('min_', roi)
 
+# Concatenate the variables
+new_data_test = cbind(test_info, q1_reduced_test, q2_reduced_test, q3_reduced_test, min_reduced_test, max_reduced_test)
+new_data_test = new_data_test[, -1]
 
-prova_test = cbind(test_info, q1_roi_test, q2_roi_test, q3_roi_test, min_roi_test, max_roi_test)
-prova_test = prova_test[, -1]
+new_data_test$sex = as.factor(ifelse(new_data_test$sex == 'male', 1, 0))
 
-prova_test$sex = as.factor(ifelse(prova_test$sex == 'male', 1, 0))
-
-colnames(prova_10_corr)[1:50] # --> sono le nostre variabili, senza la y
-prova_10_test <- prova_test[, colnames(prova_10_corr)[1:50]]
+new_data_10_test <- new_data_test[, colnames(new_data_50)[1:50]]
 
 ```
 
 
-Infine, procediamo con il predict del modello, e salviamo i risultati in un file .csv che caricheremo su Kaggle.
+We can finally make the predictions and save the output in a .csv file, that we can submit in Kaggle.
 
 ```{r}
 id <- test$id
-target = predict(rf_default10, newdata = prova_10_test)
+target = predict(model50, newdata = new_data_10_test)
 target = ifelse(target == 1, 'autism', 'control')
 
 preds_g11 = data.frame('id' = id, 'target' = target)
 table(preds_g11$target)
 
-write.csv(preds_g11, file = "preds_g11_13.csv", row.names = FALSE)
+write.csv(preds_g11, file = "/Users/simonefacchiano/Desktop/Data Science/SL/Homework 2/preds_g11.csv", row.names = FALSE)
 ```
