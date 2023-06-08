@@ -1,30 +1,43 @@
-# QUI HO SEMPLICEMENTE FATTO COSì:
-# - RUNNATO UN PRIMO MODELLO CON TUTTE LE VARIABILI
-# CONSIDERATO Q1, Q2, Q3, MIN E MAX
-# FATTO LA VARIABLE IMPORTANCE E PLOTTATO IL RISULTATO
-# NOTATO UN GOMITO A 50, E SELEZIONATO LE PRIME 50 VARIABILI
-# USATO IL MODELLO CON LE 50 VARIABILI
-# Niente selezione tramite LOCO
+---
+title: "HW2_Bravi_Facchiano_Liguori"
+author: "simone facchiano"
+date: "6/7/2023"
+output: html_document
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
-#     Statistical Learning Homework 2, group 11
-# Susanna Bravi, Simone Facchiano, Raffaele Liguori
+## Packets
 
-
-
-# 0 - Packages --------------------------------------------------------
-
+```{r}
 library(readr)
+library(ggplot2)
+library(corrplot)
+library(caret)
+library(dplyr)
 
+```
 
-# 1 - Initialization ------------------------------------------------------
+## Initialization
 
+First, we imported the packages and data.
+
+```{r pressure, echo=FALSE}
 setwd("~/Desktop/Data Science/SL/Homework 2")
+
 train <- read_csv("train_hw03.csv")
+```
 
 
-# 2 - Preprocessing -------------------------------------------------------
+## Preprocessing
 
+At this point we began with an initial analysis of the data. The first thing we noticed was the fact that different patients seemed to report measurements on different scales. Most of them all had values close to zero, while others (for example, patient number 2) showed extremely larger values. <br>
+
+Since our ultimate goal was to construct a classifier capable of distinguishing between the two classes 'autism' and 'control,' we decided to standardize (by row) our dataset. This ensured that we had comparable data between them, and we could proceed with our work.
+
+```{r}
 # Problema: i valori (alcuni intorno allo 0, altri del tutto sballati)
 hist(rowMeans(train[, -c(1:4)]), breaks = 20) # ad esempio, qui la seconda riga ha media -3, mentre tutte le altre sono intorno allo 0
 
@@ -34,14 +47,23 @@ train_roi <- train[, -c(1:4)]
 
 hist(rowMeans(train_roi), border = F)
 
-# train_roi_belle = train_roi[abs(rowMeans(train_roi)) <= 2, ]
-# train_info_belle = train_info[abs(rowMeans(train_roi)) <= 2, ]
-
-
 # Scale
 # 1)
 train_roi_scale = data.frame(t(apply(train_roi, 1, scale)))
+```
 
+Standardization was only our first step toward building a dataset that would allow us to build a suitable classifier. <br>
+Indeed, although a high number of variables is generally a good starting point for building a good model, we cannot forget the danger of overfitting that would compromise our results. <br>
+
+We therefore opted for a dimensional reduction in our data. <br>
+The most immediate idea was to use PCA, but we ran into a number of problems. Indeed, not only was it not easy to identify a simple 'cut-off' point from the graph of the cumulative variance of the principal components, but it was also not easy to give an interpretation of the variables we were using. And since we had to select the most important variables with specific techniques, this could be quite a problem. <br>
+
+We decided to change our strategy. <br>
+Since the rows of the dataset were in fact so many time-series concatenated one after the other, the choice fell on extracting some indices for each time-series, and to use them as new features for our model. <br>
+Since the rows had been standardized, taking the mean and standard deviation would not have made sense: we therefore opted for more robust position indicators, such as quartiles, maximum and minimum. <br>
+These indices were extracted for each historical series, and then put together to create a new reduced dataset.
+
+```{r}
 # 2)
 
 q1_roi <- as.data.frame(sapply(seq(1, ncol(train_roi_scale), 115), function(start) {
@@ -97,27 +119,25 @@ colnames(min_roi) = paste0('min_', roi)
 
 prova = cbind(train_info, q1_roi, q2_roi, q3_roi, min_roi, max_roi)
 prova = prova[, -1]
-rm(train)
-
-prop.table(table(prova$sex, prova$y))
 
 prova$sex = as.factor(ifelse(prova$sex == 'male', 1, 0))
 prova$y = as.factor(ifelse(prova$y == 'autism', 1, 0))
 
+```
 
+## The Model: Random Forest for Classification
 
-# Modello: Random Forest --------------------------------------------------
+At this point we were ready to build our model. The choice that seemed most suitable to us was to use a Random Forest. Moreover, despite the reduction in size of the dataset, the number of variables still appeared quite large. Therefore, we chose to use again the caret library, which integrates within it a method specifically referred to the Random Forest.
 
-library(caret)
+```{r}
 control <- trainControl(method='cv', 
                         number = 5)
 
 metric <- "Accuracy"
 set.seed(123)
-mtry <- round(sqrt(ncol(prova) - 1)) # optimal number of columns
+mtry <- round(sqrt(ncol(prova) - 1)) # optimal number of variables for the bootstrap
 
-# tunegrid <- expand.grid(.mtry=mtry)
-tunegrid <- expand.grid(.mtry=c(6, 9, 19, 21, 25))
+tunegrid <- expand.grid(.mtry=mtry)
 
 rf_default <- train(y ~. , 
                     data = prova, 
@@ -126,26 +146,29 @@ rf_default <- train(y ~. ,
                     tuneGrid = tunegrid,
                     trControl = control)
 print(rf_default)
-plot(rf_default)
+```
 
+One of the reasons the Random Forest seemed like a good idea is that we can easily extract a measure of Variable Importance from the model. Once this quantity was calculated for all variables we plotted the result. It seemed reasonable to us to focus on the first 50 variables, which offered the right trade-off between model simplicity and good performance.
 
+```{r}
 # VARIABLE IMPORTANCE
 best_mtry <- as.numeric(rf_default$bestTune)
 baseline_accuracy <- rf_default$results$Accuracy[rf_default$results$mtry == best_mtry]
 
-varImp(rf_default, scale = F)
 var_imp = data.frame(varImp(rf_default, scale = F)$importance)
 var_imp$variable = rownames(var_imp)
 var_imp <- data.frame(var_imp[order(var_imp$Overall, decreasing = TRUE), ])
 
-plot(var_imp[, 1], type = 'l', lwd = 2.5, col = 'steelblue')
+plot(var_imp[, 1], type = 'l', lwd = 2.5, col = 'steelblue', ylab = 'Variable Importance')
 grid()
-abline(v = c(10, 50), col = 'red', lwd = 1.7, lty = 2)
+abline(v = 50, col = 'red', lwd = 1.7, lty = 2)
 
 top_variables = var_imp[1:50, 2]
+```
 
+Having reached this point, we built a new model using the 50 variables just extracted. The only hyperparameter we tried to vary in our tunegrid concerns the number of variables sampled during the costruction of the trees. As expected, the parameter value that provided the best performance was the one closest to sqrt(ncol).
 
-
+```{r}
 # Nuovo modello con 50 variabili ------------------------------------------
 
 prova_10_corr <- prova[, c(top_variables)]
@@ -156,185 +179,25 @@ control <- trainControl(method='repeatedcv',
                         repeats=3,
                         search = 'random')
 
-#tunegrid <- expand.grid(.mtry=9)
 tunegrid <- expand.grid(.mtry=c(6, 7, 8, 9))
 rf_default10 <- train(y ~. , 
                       data = prova_10_corr, 
                       method = 'rf', 
                       metric = 'Accuracy', 
                       tuneGrid = tunegrid,
-                      #ntree = 1000,
                       trControl = control)
 print(rf_default10)
+```
 
-# LOCO -------------------------------------------------------------------
+Having reached this point, we can consider our model finished. However, we are curious to find out whether the Variable Importance we obtained from the random forest coincides with the scores we can obtain from the LOCO procedure
+[ SPIEGA LA LOCO ]
 
-top_variables
+## LOCO: an alternative view on Variable Importance
 
-# PARTE 1: CONTROLLARE LA CORRELAIZONE TRA LE VARIABILI
-
-prova_10 <- prova[, c(top_variables)]
-prova_10_corr <- prova[, c(top_variables)]
-
-library(corrplot)
-corrplot(cor(prova_10_corr))
-
-# COPPIE CHE FANNO STORIE:
-# q3_8302, q1_8302
-# q3_6402, q1_6402
-# q3_6401, q1_6401
-# q3_4022, q1_4022
-
-# Eliminiamo q1_8302 perché è la meno importante
-prova_10_corr <- prova_10_corr[, !(names(prova_10_corr) %in% c('q1_8302'))]
-# , 'q1_6402', 'q1_6401', 'q1_4022'
-
-prova_10_corr$y <- prova$y
-
-
-control <- trainControl(method='cv', 
-                        number = 10)
-
-#tunegrid <- expand.grid(.mtry=9)
-tunegrid <- expand.grid(.mtry=c(6, 7, 8, 9))
-rf_default10 <- train(y ~. , 
-                      data = prova_10_corr, 
-                      method = 'rf', 
-                      metric = 'Accuracy', 
-                      tuneGrid = tunegrid,
-                      #ntree = 1000,
-                      trControl = control)
-print(rf_default10)
-
-set.seed(123)
-variables_name = c()
-accuracies = c()
-new_acc = c()
-for(j in 1:(ncol(prova_10_corr) - 1)){
-  
-  #variables_number <- c(variables, j)
-  variables_name <- c(variables_name, colnames(prova_10_corr)[j])
-  
-  mtry <- round(sqrt(ncol(prova_10_corr) - 1)) # optimal number of columns
-  tunegrid <- expand.grid(.mtry=9)
-  mdl <- train(y ~. , 
-               data = prova_10_corr[, -j], 
-               method = 'rf', 
-               metric = 'Accuracy', 
-               tuneGrid = tunegrid, 
-               trControl = control)
-  
-  new_acc <- c(new_acc, mdl$results$Accuracy)
-  accuracies <- c(accuracies, baseline_accuracy - mdl$results$Accuracy)
-}
-
-data.frame(cbind('Missing Variable' = variables_name, 'Delta Accuracy' = accuracies), 'New Accuracy' = new_acc)
-
-
-
-# Codice Raffaele per vedere il migliore ----------------------------------
-
-idx <- sample(1:600,size=120, replace=F)
-prova_10_train <- prova_10_corr[-idx,]
-prova_10_test <- prova_10_corr[idx,]
-accuracy_test=c()
-variables <- c()
-accuracies <- c()
-
-for(j in 1:(ncol(prova_10_corr) - 1)){
-  
-  variables <- c(variables, colnames(prova_10_corr)[j])
-  
-  mtry <- round(sqrt(ncol(prova_10_corr) - 1)) # optimal number of variables
-  tunegrid <- expand.grid(.mtry=19) # <-- 19 era il numero che garantiva l'accuracy migliore
-  mdl <- train(y ~. , 
-               data = prova_10_train[, -j], 
-               method = 'rf', 
-               metric = 'Accuracy', 
-               tuneGrid = tunegrid, 
-               trControl = control)
-  pred <- predict(mdl, newdata=prova_10_test)
-  accuracy_test <- c(accuracy_test,mean(pred==prova_10_test$y))
-  accuracies <- c(accuracies, baseline_accuracy - mdl$results$Accuracy)
-}
-
-data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = round(accuracies, 3), 'accuracy'= round(accuracies+baseline_accuracy, 3), 'test_accuracy'= round(accuracy_test, 3)))
-
-############
-
-# Bene! Proviamo a togliere la variabile q2_8101
-prova_10_corr <- prova_10_corr[, !(names(prova_10_corr) %in% c('q2_8101'))]
-tunegrid <- expand.grid(.mtry=c(6, 9, 15, 19, 21, 25))
-rf_default10 <- train(y ~. , 
-                      data = prova_10_corr, 
-                      method = 'rf', 
-                      metric = 'Accuracy', 
-                      tuneGrid = tunegrid,
-                      #ntree = 50,
-                      trControl = control)
-print(rf_default10)
-rf_default10
-
-# Correlazione tra variabili ----------------------------------------------
-
-
-small_dataset <- prova_10[, -c(21)]
-
-library(corrplot)
-corrplot(cor(small_dataset))
-
-cor(small_dataset[1:2]) # ce ne sono alcune troppo correlate. perciò ne dobbiamo togliere alcune... ma quali? Riguardiamo la variable importance
-varImp(rf_default10, scale = F)
-
-
-# small_dataset <- small_dataset[, -c('q1_8302', 'q1_4022')]
-small_dataset <- small_dataset[, !(names(small_dataset) %in% c('q1_8302', 'q1_4022', 'q3_6401'))]
-small_dataset$y <- prova_10$y
-
-
-# LOCO di nuovo:
-variables = c()
-accuracies = c()
-new_acc = c()
-for(j in 1:(ncol(small_dataset) - 1)){
-  
-  variables <- c(variables, j)
-  
-  mtry <- round(sqrt(ncol(small_dataset) - 1)) # optimal number of columns
-  tunegrid <- expand.grid(.mtry=mtry)
-  mdl <- train(y ~. , 
-               data = small_dataset[, -j], 
-               method = 'rf', 
-               metric = 'Accuracy', 
-               tuneGrid = tunegrid, 
-               trControl = control)
-  
-  new_acc <- c(new_acc, mdl$results$Accuracy)
-  accuracies <- c(accuracies, baseline_accuracy - mdl$results$Accuracy)
-}
-
-data.frame(cbind('Missing Variable' = variables, 'Delta Accuracy' = accuracies), 'New Accuracy' = new_acc)
-
-
-tunegrid <- expand.grid(.mtry=c(6, 9, 19, 21))
-mdl_submission <- train(y ~. , 
-                        data = small_dataset[, -10], 
-                        method = 'rf', 
-                        metric = 'Accuracy', 
-                        tuneGrid = tunegrid, 
-                        trControl = control)
-
-print(mdl_submission)
-
-
-
-
-# LOCO per davvero --------------------------------------------------------
-
+```{r}
 prova_10 <- prova[, c(top_variables[1:13], 'y')] # <-- OUR TOP VARIABLES + FLOP variables
 
 # STEP 0: check for highly correlated variables
-library(corrplot)
 corrplot(cor(prova_10[, -14]))
 
 
@@ -351,7 +214,6 @@ for (i in 1:nrow(high_cor_pairs)) {
 
 discard_variables <- unique(discard_variables)
 
-library(dplyr)
 LOCO_variables <- prova_10 %>%
   select(-one_of(discard_variables))
 
@@ -412,32 +274,25 @@ for(j in 1:(ncol(LOCO_variables)-1)){
 
 LOCO_scores
 LOCO_punctual
+```
 
-plot(1, cex = 0, xlim = c(1, 10), ylim = c(-0.05, 1.05))
-grid()
-abline(h = 0, lty = 2)
-for(i in 1:10){
-  lines(x = c(i, i), y = c(unlist(LOCO_scores[i]) ), lwd = 2)
-}
+We can also plot the LOCO scores:
 
-points(1:10, LOCO_punctual, pch = 20, col = 'red')
-
-
-#### GRAFICO FATTO BENE
- 
-library(ggplot2)
+```{r}
 
 df <- data.frame(do.call(rbind, LOCO_scores))
+LOCO_punctual_df <- data.frame(x = 1:10, y = LOCO_punctual)
 
-x = seq(0, 10, length.out = 10)
+x = seq(1, 10, length.out = 10)
 y = seq(0, 1, length.out=10)
 brks <- seq(0, 1, 0.1)
-ggplot(data = df)+
+ggplot(data = df,
+       mapping = aes(x=x,y=y))+
   geom_errorbar(alpha=1.5, linetype=1, size=0.8,
                 ymin=df$X1,
                 ymax=df$X2,
-                mapping = aes(x=x,y=y),
-                color="#0e668b")+
+                color="#a3c4dc")+ 
+  geom_point(x = LOCO_punctual_df$x, y = LOCO_punctual_df$y, col = "#0e668b")+
   coord_flip()+
   scale_y_continuous(breaks = brks, labels = brks)+
   scale_x_continuous(breaks = seq(0, 10, 1), labels = seq(0, 10, 1))+
@@ -452,12 +307,13 @@ ggplot(data = df)+
         panel.grid.major.y=element_blank(),
         panel.grid.major.x=element_line(),
         axis.ticks=element_blank())
+```
 
+## Predictions
 
+A questo punto, siamo pronti per fare le nostre previsioni. Importiamo dunque il test set, facciamo dimensionality reduction ed estraiamo le 50 variabili più importanti.
 
-
-# Predict -----------------------------------------------------------------
-
+```{r}
 test <- read_csv("test_hw03.csv")
 head(test)
 
@@ -530,6 +386,12 @@ prova_test$sex = as.factor(ifelse(prova_test$sex == 'male', 1, 0))
 colnames(prova_10_corr)[1:50] # --> sono le nostre variabili, senza la y
 prova_10_test <- prova_test[, colnames(prova_10_corr)[1:50]]
 
+```
+
+
+Infine, procediamo con il predict del modello, e salviamo i risultati in un file .csv che caricheremo su Kaggle.
+
+```{r}
 id <- test$id
 target = predict(rf_default10, newdata = prova_10_test)
 target = ifelse(target == 1, 'autism', 'control')
@@ -538,3 +400,4 @@ preds_g11 = data.frame('id' = id, 'target' = target)
 table(preds_g11$target)
 
 write.csv(preds_g11, file = "preds_g11_13.csv", row.names = FALSE)
+```
