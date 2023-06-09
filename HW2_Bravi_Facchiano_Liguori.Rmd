@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 First, we imported the packages and data.
 
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, message=FALSE, warning = FALSE}
 
 library(readr)
 library(ggplot2)
@@ -153,9 +153,9 @@ Our first model with all the variables doesn't perform very well. We have an acc
 
 ## Variable Importance
 
-One of the reasons why Random Forest seemed a good idea is that we can easily extract a measure of **Variable Importance** directly from the model, using an index called Mean Decrease Accuracy (MDA). Once this quantity was computed for all variables, we plotted the result. It seemed reasonable to us to focus on the first 50 variables, which offered the right trade-off between model simplicity and good performance.
+One of the reasons why Random Forest seemed a good idea is that we can easily extract a measure of **Variable Importance** directly from the model, using an index called Mean Decrease Accuracy (MDA). Once this quantity was computed for all variables, we plotted the results. It seemed reasonable to us to focus on the first 50 variables, which offered the right trade-off between model simplicity and good performance.
 
-```{r}
+```{r, warning=FALSE}
 
 # Extract the variable importance for each feature with the default caret function
 var_imp = data.frame(varImp(model1, scale = F)$importance)
@@ -217,9 +217,9 @@ At this point, we can consider our model finished. However, we are curious to fi
 **LOCO** Inference is a procedure developed by Lei et al. (2016), which is proposed as an alternative measure of variable importance. <br>
 This procedure consists in estimating a function $\hat{f}_{n_1}$ over the entire training dataset, and comparing an arbitrary loss of it (in our case we chose to use the *F1 score*) with the one of a function $\hat{f}_{n_1}^{-j}$, obtained by removing one variable j at a time from the dataset. <br>
 
-To reduce computational costs, we have selected only the top variables by their importance. To avoid biases in the results, we checked the presence of highly correlated variables before evaluating the LOCO scores. In fact, citing the book [Limitations of Interpretable Machine Learning Methods](https://slds-lmu.github.io/iml_methods_limitations/pfi-correlated.html), «If you leave out one feature that is perfectly correlated to the other, the performance will be the same as before. Since the feature which is still in the data set contains exactly the same information as the one left out there is no alteration in performance».
+To reduce computational costs, we have selected only the top variables by their importance. To avoid biases in the results, we then checked the presence of highly correlated variables before evaluating the LOCO scores, and we discarded the variables that show a very high correlation. In fact, citing the book [Limitations of Interpretable Machine Learning Methods](https://slds-lmu.github.io/iml_methods_limitations/pfi-correlated.html), «If you leave out one feature that is perfectly correlated to the other, the performance will be the same as before. Since the feature which is still in the data set contains exactly the same information as the one left out there is no alteration in performance».
 
-```{r}
+```{r, echo=FALSE}
 
 # Build a reduced dataset with only the most important features
 new_data_10 <- new_data[, c(top_variables[1:13], 'y')]
@@ -258,6 +258,8 @@ LOCO_variables <- new_data_10 %>%
   select(-one_of(discard_variables))
 
 ```
+
+We are now ready to compute the LOCO scores.
 
 ```{r}
 
@@ -316,9 +318,9 @@ for(j in 1:(ncol(LOCO_variables)-1)){
 
 ```
 
-We can plot the LOCO scores:
+We can also plot the LOCO scores:
 
-```{r}
+```{r, echo=FALSE}
 
 df <- data.frame(do.call(rbind, LOCO_scores))
 LOCO_punctual_df <- data.frame(x = 1:10, y = LOCO_punctual)
@@ -356,16 +358,13 @@ From this graph, however, we can infer how the first 10 variables show LOCO scor
 ## Predictions
 
 We are finally ready to make predictions on our test set. <br>
-We therefore import the dataset, reduce the dimensionality by exracting the quartiles and the maximum and minimum for each time series and fit the model.
+We therefore import the dataset, reduce the dimensionality by exracting the quartiles and the maximum and minimum for each time series and finally fit the model.
 
-```{r}
+```{r, results='hide', warning=FALSE}
 test <- read_csv("/Users/simonefacchiano/Desktop/Data Science/SL/Homework 2/test_hw03.csv")
-head(test)
 
 test_info <- test[, c(1:3)]
 test_roi <- test[, -c(1:3)]
-
-hist(rowMeans(test_roi))
 
 # Scale
 test_roi_scale = data.frame(t(apply(test_roi, 1, scale)))
@@ -423,7 +422,6 @@ target = predict(model50, newdata = new_data_10_test)
 target = ifelse(target == 1, 'autism', 'control')
 
 preds_g11 = data.frame('id' = id, 'target' = target)
-table(preds_g11$target)
 
 write.csv(preds_g11, file = "/Users/simonefacchiano/Desktop/Data Science/SL/Homework 2/preds_g11.csv", row.names = FALSE)
 ```
